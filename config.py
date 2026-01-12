@@ -13,7 +13,7 @@ load_dotenv()
 # Qdrant (从环境变量读取，不要硬编码!)
 QDRANT_URL = os.getenv("QDRANT_URL", "")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
-QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "geoscience_papers")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "geomind_papers")
 
 
 # DeepSeek (从环境变量读取，不要硬编码!)
