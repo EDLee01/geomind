@@ -7,7 +7,6 @@ import subprocess
 import sys
 import os
 import time
-import signal
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -22,11 +21,15 @@ def start_network():
     """启动 OpenAgents Network"""
     print("🌐 Starting OpenAgents Network...")
     
-    # 创建 workspace 目录
     workspace_dir = "/app/workspace"
-    os.makedirs(workspace_dir, exist_ok=True)
+    config_path = os.path.join(workspace_dir, "network.yaml")
     
-    # 启动 network（后台运行）
+    if not os.path.exists(config_path):
+        print(f"❌ network.yaml not found at {config_path}")
+        return None
+    
+    print(f"✅ Found network.yaml")
+    
     process = subprocess.Popen(
         ["openagents", "network", "start", workspace_dir],
         stdout=subprocess.PIPE,
@@ -34,46 +37,65 @@ def start_network():
         text=True,
     )
     
-    # 等待网络启动
-    time.sleep(5)
+    print("⏳ Waiting for network to initialize (15s)...")
+    time.sleep(15)
     
     if process.poll() is None:
         print("✅ OpenAgents Network started on port 8700")
         return process
     else:
         print("❌ Failed to start OpenAgents Network")
-        stdout, _ = process.communicate()
+        stdout = process.stdout.read() if process.stdout else ""
         print(stdout)
         return None
 
 
-async def start_agents():
-    """启动所有 Agent"""
-    from config import NETWORK_HOST, NETWORK_PORT, NETWORK_ID, AGENT_IDS
+async def start_agents_with_retry(max_retries=5, retry_delay=5):
+    """启动所有 Agent（带重试机制）"""
+    from config import NETWORK_HOST, NETWORK_PORT, NETWORK_ID
     from agents import PlannerAgent, ResearchAgent, CriticAgent, WriterAgent
     
     print("📦 Creating agents...")
     
-    agents = [
-        PlannerAgent(),
-        ResearchAgent(),
-        CriticAgent(),
-        WriterAgent(),
+    agents_config = [
+        ("Planner", PlannerAgent),
+        ("Research", ResearchAgent),
+        ("Critic", CriticAgent),
+        ("Writer", WriterAgent),
     ]
     
-    print(f"🔗 Connecting to OpenAgents ({NETWORK_HOST}:{NETWORK_PORT})...")
+    connected_agents = []
     
-    for agent in agents:
-        agent.start(
-            network_host=NETWORK_HOST,
-            network_port=NETWORK_PORT,
-            network_id=NETWORK_ID
-        )
-        print(f"  ✓ {agent.default_agent_id}")
-        await asyncio.sleep(0.5)
+    for name, AgentClass in agents_config:
+        for attempt in range(max_retries):
+            try:
+                print(f"🔗 Connecting {name}Agent... (attempt {attempt + 1}/{max_retries})")
+                
+                agent = AgentClass()
+                agent.start(
+                    network_host=NETWORK_HOST,
+                    network_port=NETWORK_PORT,
+                    network_id=NETWORK_ID
+                )
+                
+                print(f"  ✓ {name}Agent connected")
+                connected_agents.append(agent)
+                await asyncio.sleep(1)
+                break
+                
+            except Exception as e:
+                print(f"  ⚠️ {name}Agent failed: {e}")
+                if attempt < max_retries - 1:
+                    print(f"  ⏳ Retrying in {retry_delay}s...")
+                    await asyncio.sleep(retry_delay)
+                else:
+                    print(f"  ❌ {name}Agent failed after {max_retries} attempts")
     
-    print("✅ All agents connected!")
-    return agents
+    if len(connected_agents) == 0:
+        raise Exception("No agents could connect to the network")
+    
+    print(f"✅ {len(connected_agents)}/{len(agents_config)} agents connected!")
+    return connected_agents
 
 
 async def main():
@@ -83,7 +105,6 @@ async def main():
     print("=" * 60)
     print()
     
-    # 检查环境变量
     from config import QDRANT_URL, QDRANT_API_KEY, DEEPSEEK_API_KEY
     
     missing = []
@@ -101,42 +122,45 @@ async def main():
     print(f"✅ DeepSeek API: configured")
     print()
     
-    # 启动 OpenAgents Network
     network_process = start_network()
     if not network_process:
+        print("❌ Cannot start without network, exiting...")
         sys.exit(1)
     
-    # 启动 Agents
+    print("⏳ Additional wait for network stability (10s)...")
+    await asyncio.sleep(10)
+    
+    agents = []
+    
     try:
-        agents = await start_agents()
+        agents = await start_agents_with_retry(max_retries=5, retry_delay=5)
         
         print()
         print("=" * 60)
         print("  🚀 GeoMind is LIVE!")
         print("=" * 60)
         print()
-        print(f"  📱 Access: https://your-app.zeabur.app:8700/")
-        print(f"  💬 DM @geomind-planner to start")
-        print()
         
-        # Keep running
         while True:
             await asyncio.sleep(10)
             
     except KeyboardInterrupt:
         print("\n⏹️ Shutting down...")
+    except Exception as e:
+        print(f"❌ Startup error: {e}")
     finally:
-        # 停止 agents
         for agent in agents:
             try:
                 agent.stop()
             except:
                 pass
         
-        # 停止 network
         if network_process:
             network_process.terminate()
-            network_process.wait()
+            try:
+                network_process.wait(timeout=5)
+            except:
+                network_process.kill()
         
         print("✅ Shutdown complete")
 
