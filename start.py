@@ -1,12 +1,13 @@
 """
-GeoMind - Zeabur 部署启动脚本
-同时启动 OpenAgents Network + 4 个 Agent
+GeoMind - Zeabur 部署启动脚本 v2
 """
 import asyncio
 import subprocess
 import sys
 import os
 import time
+import threading
+import socket
 
 import nest_asyncio
 nest_asyncio.apply()
@@ -15,6 +16,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
 load_dotenv()
+
+
+def print_output(pipe, prefix):
+    """实时打印进程输出"""
+    for line in iter(pipe.readline, ''):
+        if line:
+            print(f"{prefix} {line.strip()}")
 
 
 def start_network():
@@ -33,25 +41,43 @@ def start_network():
     process = subprocess.Popen(
         ["openagents", "network", "start", workspace_dir],
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
+        bufsize=1,
     )
     
-    print("⏳ Waiting for network to initialize (15s)...")
-    time.sleep(15)
+    # 打印 network 输出
+    stdout_thread = threading.Thread(
+        target=print_output, 
+        args=(process.stdout, "[Network]"),
+        daemon=True
+    )
+    stderr_thread = threading.Thread(
+        target=print_output,
+        args=(process.stderr, "[Network ERR]"),
+        daemon=True
+    )
+    stdout_thread.start()
+    stderr_thread.start()
     
-    if process.poll() is None:
-        print("✅ OpenAgents Network started on port 8700")
-        return process
-    else:
-        print("❌ Failed to start OpenAgents Network")
-        stdout = process.stdout.read() if process.stdout else ""
-        print(stdout)
-        return None
+    # 等待并检查端口
+    for i in range(30):
+        time.sleep(2)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1', 8700))
+        sock.close()
+        
+        if result == 0:
+            print(f"✅ Port 8700 is listening! (after {(i+1)*2}s)")
+            return process
+        else:
+            print(f"⏳ Waiting for port 8700... ({(i+1)*2}s)")
+    
+    print("❌ Port 8700 never started listening")
+    return process
 
 
-async def start_agents_with_retry(max_retries=5, retry_delay=5):
-    """启动所有 Agent（带重试机制）"""
+async def start_agents_with_retry(max_retries=5, retry_delay=10):
     from config import NETWORK_HOST, NETWORK_PORT, NETWORK_ID
     from agents import PlannerAgent, ResearchAgent, CriticAgent, WriterAgent
     
@@ -80,7 +106,7 @@ async def start_agents_with_retry(max_retries=5, retry_delay=5):
                 
                 print(f"  ✓ {name}Agent connected")
                 connected_agents.append(agent)
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
                 break
                 
             except Exception as e:
@@ -88,81 +114,49 @@ async def start_agents_with_retry(max_retries=5, retry_delay=5):
                 if attempt < max_retries - 1:
                     print(f"  ⏳ Retrying in {retry_delay}s...")
                     await asyncio.sleep(retry_delay)
-                else:
-                    print(f"  ❌ {name}Agent failed after {max_retries} attempts")
     
     if len(connected_agents) == 0:
         raise Exception("No agents could connect to the network")
     
-    print(f"✅ {len(connected_agents)}/{len(agents_config)} agents connected!")
     return connected_agents
 
 
 async def main():
     print("=" * 60)
-    print("  🌍 GeoMind - Multi-Agent Literature Review System")
-    print("  Zeabur Cloud Deployment")
+    print("  🌍 GeoMind v2 - Debug Mode")
     print("=" * 60)
-    print()
     
     from config import QDRANT_URL, QDRANT_API_KEY, DEEPSEEK_API_KEY
     
-    missing = []
-    if not QDRANT_API_KEY:
-        missing.append("QDRANT_API_KEY")
-    if not DEEPSEEK_API_KEY:
-        missing.append("DEEPSEEK_API_KEY")
-    
-    if missing:
-        print(f"❌ Missing environment variables: {missing}")
-        print("Please set them in Zeabur dashboard")
+    if not QDRANT_API_KEY or not DEEPSEEK_API_KEY:
+        print("❌ Missing API keys")
         sys.exit(1)
     
-    print(f"✅ Qdrant: {QDRANT_URL[:40]}...")
-    print(f"✅ DeepSeek API: configured")
-    print()
+    print(f"✅ Config OK")
     
     network_process = start_network()
     if not network_process:
-        print("❌ Cannot start without network, exiting...")
         sys.exit(1)
-    
-    print("⏳ Additional wait for network stability (10s)...")
-    await asyncio.sleep(10)
     
     agents = []
     
     try:
-        agents = await start_agents_with_retry(max_retries=5, retry_delay=5)
-        
-        print()
-        print("=" * 60)
-        print("  🚀 GeoMind is LIVE!")
-        print("=" * 60)
-        print()
+        agents = await start_agents_with_retry()
+        print("🚀 GeoMind is LIVE!")
         
         while True:
             await asyncio.sleep(10)
             
-    except KeyboardInterrupt:
-        print("\n⏹️ Shutting down...")
     except Exception as e:
-        print(f"❌ Startup error: {e}")
+        print(f"❌ Error: {e}")
     finally:
         for agent in agents:
             try:
                 agent.stop()
             except:
                 pass
-        
         if network_process:
             network_process.terminate()
-            try:
-                network_process.wait(timeout=5)
-            except:
-                network_process.kill()
-        
-        print("✅ Shutdown complete")
 
 
 if __name__ == "__main__":
