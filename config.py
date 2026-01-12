@@ -37,7 +37,7 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 # ========================
 # OpenAgents Network Configuration
 # ========================
-NETWORK_HOST = os.getenv("NETWORK_HOST", "localhost")
+NETWORK_HOST = os.getenv("NETWORK_HOST", "127.0.0.1")
 NETWORK_PORT = int(os.getenv("NETWORK_PORT", "8700"))
 NETWORK_ID = os.getenv("NETWORK_ID", "main")
 
