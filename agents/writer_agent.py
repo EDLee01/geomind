@@ -33,14 +33,16 @@ def format_papers_detailed(papers: List[Dict], max_papers: int = 30) -> str:
             author_str = "Unknown"
 
         year = p.get('year', 'N/A')
-        title = p.get('title', 'Untitled')[:80]
-        journal = p.get('journal', 'Unknown')[:40]
+        title = p.get('title', 'Untitled')  # 不截断标题！
+        journal = p.get('journal', p.get('journal_name', 'Unknown'))[:40]
         abstract = p.get('abstract', '')[:200]
         citations = p.get('cited_by_count', 0)
+        doi = p.get('doi', '')  # 添加 DOI
 
         lines.append(f"""[{i}] {author_str} ({year})
 标题: {title}
 期刊: {journal} | 引用: {citations}
+DOI: {doi}
 摘要: {abstract}...
 """)
 
@@ -199,10 +201,25 @@ class WriterAgent(WorkerAgent):
 - 全文必须引用 **至少 20 篇不同文献**
 - 结尾列出所有引用的参考文献（完整格式，按作者字母排序）
 
+**参考文献格式要求（非常重要）**:
+在综述末尾的参考文献列表中，每条必须包含 DOI 链接：
+
+格式示例：
+Chen, S., et al. (2021). Larger phosphorus flux triggered by smaller tributary watersheds in a river reservoir system after dam construction. Journal of Hydrology. https://doi.org/10.1016/j.jhydrol.2021.126956
+
+Wang, L., & Zhang, H. (2023). Machine learning for water quality prediction in rivers. Water Research. https://doi.org/10.1016/j.watres.2023.xxxxxx
+
+要求：
+- 必须使用论文库中提供的**完整原始标题**，不要截断或修改
+- 必须包含论文库中提供的 **DOI 链接**
+- 如果论文没有 DOI，则省略 DOI 部分
+- DOI 链接格式：https://doi.org/10.xxxx/xxxxx
+
 注意：
 - 上面提供的每篇论文都是精选的高质量文献，请尽量全部引用
 - 引用时要结合论文的具体内容（标题、摘要信息）
 - 不要只引用同一篇论文多次，要分散引用
+- **标题必须与论文库中的完全一致，不要自行缩写或修改**
 
 直接输出综述正文:"""
 
